@@ -1,15 +1,17 @@
 'use client'
 import { useEffect, useState } from 'react'
-import { createClient } from '@/lib/supabase/client'
 import { useRouter } from 'next/navigation'
+import { useAuth } from '@/hooks/useAuth'
+import { generateCode, formatDate } from '@/utils/helpers'
 import PasswordModal from '@/app/components/PasswordModal'
 import ConfirmModal from '@/app/components/ConfirmModal'
 import toast from 'react-hot-toast'
+import type { Wall } from '@/types'
 
 export default function DashboardPage() {
-  const [user, setUser] = useState<any>(null)
+  const { user, supabase } = useAuth()
   const [username, setUsername] = useState('')
-  const [walls, setWalls] = useState<any[]>([])
+  const [walls, setWalls] = useState<Wall[]>([])
   const [joinCode, setJoinCode] = useState('')
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
@@ -21,73 +23,70 @@ export default function DashboardPage() {
   const [selectedWallId, setSelectedWallId] = useState<string | null>(null)
   const [showWallPasswordModal, setShowWallPasswordModal] = useState(false)
   const router = useRouter()
-  const supabase = createClient()
 
   useEffect(() => {
-    supabase.auth.getUser().then(async ({ data }) => {
-      if (!data.user) router.push('/auth/login')
-      else {
-        setUser(data.user)
-        const { data: profile } = await supabase
-          .from('profiles')
-          .select('username')
-          .eq('id', data.user.id)
-          .single()
-        if (profile) setUsername(profile.username)
-        fetchWalls(data.user.id)
-      }
-    })
-  }, [])
+    if (user) {
+      fetchUsername()
+      fetchWalls()
+    }
+  }, [user])
 
-  const fetchWalls = async (userId: string) => {
+  const fetchUsername = async () => {
+    if (!user) return
+    const { data } = await supabase
+      .from('profiles')
+      .select('username')
+      .eq('id', user.id)
+      .single()
+    if (data) setUsername(data.username)
+  }
+
+  const fetchWalls = async () => {
+    if (!user) return
     const { data } = await supabase
       .from('walls')
       .select('*')
-      .or(`owner_id.eq.${userId},friend_id.eq.${userId}`)
+      .or(`owner_id.eq.${user.id},friend_id.eq.${user.id}`)
       .order('created_at', { ascending: false })
     setWalls(data || [])
   }
 
   const createWall = async (password: string) => {
-  setLoading(true)
-  setError('')
+    if (!user) return
+    setLoading(true)
+    setError('')
 
-  console.log('Creating wall for user:', user.id)
+    const { error } = await supabase.auth.signInWithPassword({
+      email: user.email,
+      password: password
+    })
 
-  const { error } = await supabase.auth.signInWithPassword({
-    email: user.email,
-    password: password
-  })
+    if (error) {
+      toast.error('❌ Incorrect password.')
+      setLoading(false)
+      return
+    }
 
-  if (error) {
-    console.log('Password error:', error)
-    toast.error('❌ Incorrect password. Please try again.')
-    setLoading(false)
-    return
+    const code = generateCode()
+    const { data, error: createError } = await supabase
+      .from('walls')
+      .insert({ owner_id: user.id, join_code: code })
+      .select()
+      .single()
+
+    if (createError) {
+      toast.error('Failed to create wall')
+      setLoading(false)
+    } else {
+      setWalls([data, ...walls])
+      setLoading(false)
+      setShowPasswordModal(false)
+      toast.success('✅ Wall created!')
+    }
   }
 
-  const code = Math.random().toString(36).substring(2, 8).toUpperCase()
-  console.log('Generated code:', code)
-
-  const { data, error: createError } = await supabase
-    .from('walls')
-    .insert({ owner_id: user.id, join_code: code })
-    .select()
-    .single()
-
-  console.log('Insert result:', { data, createError })
-
-  if (createError) {
-    toast.error('Failed to create wall: ' + createError.message)
-    setLoading(false)
-  } else {
-    setWalls([data, ...walls])
-    setLoading(false)
-    setShowPasswordModal(false)
-    toast.success('✅ Wall created successfully!')
-  }
-}
   const verifyWallAccess = async (password: string) => {
+    if (!user) return
     const { error } = await supabase.auth.signInWithPassword({
       email: user.email,
       password: password
@@ -103,6 +102,7 @@ export default function DashboardPage() {
   }
 
   const joinWall = async () => {
+    if (!user) return
     setLoading(true)
     setError('')
     const { data, error } = await supabase
@@ -112,21 +112,22 @@ export default function DashboardPage() {
       .single()
 
     if (error || !data) {
-      toast.error('❌ Invalid code. Please check and try again.')
+      toast.error('❌ Invalid code.')
       setLoading(false)
     } else {
       await supabase
         .from('walls')
         .update({ friend_id: user.id })
         .eq('id', data.id)
-      fetchWalls(user.id)
+      fetchWalls()
       setJoinCode('')
       setLoading(false)
-      toast.success('🎉 Joined wall successfully!')
+      toast.success('🎉 Joined wall!')
     }
   }
 
   const deleteWall = async () => {
+    if (!user) return
     const { data: wall } = await supabase
       .from('walls')
       .select('id')
@@ -134,11 +135,11 @@ export default function DashboardPage() {
       .single()
 
     if (!wall) {
-      toast.error('❌ Invalid delete code.')
+      toast.error('❌ Invalid code.')
       return
     }
 
-    const confirm = window.confirm('⚠️ Are you sure? This will delete the entire wall forever.')
+    const confirm = window.confirm('⚠️ Delete entire wall forever?')
     if (!confirm) return
 
     const { data: photos } = await supabase
@@ -152,10 +153,10 @@ export default function DashboardPage() {
     }
 
     await supabase.from('walls').delete().eq('id', wall.id)
-    fetchWalls(user.id)
+    fetchWalls()
     setDeleteCode('')
     setShowDelete(false)
-    toast.success('🗑️ Wall deleted successfully.')
+    toast.success('🗑️ Wall deleted.')
   }
 
   const handleLogout = async () => {
@@ -186,7 +187,7 @@ export default function DashboardPage() {
       `}>
         <div className="mb-8 mt-12 lg:mt-0">
           <h1 className="text-2xl font-bold">🌸 Ztag</h1>
-          <p className="text-gray-400 text-sm mt-1 truncate">Welcome, {username || user.email}</p>
+          <p className="text-gray-400 text-sm mt-1 truncate">Welcome, {username || user?.email || 'User'}</p>
         </div>
 
         <button
@@ -237,7 +238,7 @@ export default function DashboardPage() {
                   <div className="truncate">
                     <p className="font-medium text-sm">{wall.join_code}</p>
                     <p className="text-xs text-gray-400">
-                      {new Date(wall.created_at).toLocaleDateString()}
+                      {formatDate(wall.created_at)}
                       {wall.owner_id === user.id ? ' • Owner' : ' • Friend'}
                     </p>
                   </div>
@@ -283,7 +284,7 @@ export default function DashboardPage() {
                 <div className="truncate">
                   <p className="text-base sm:text-lg font-semibold">🌿 {wall.join_code}</p>
                   <p className="text-xs sm:text-sm text-gray-400 mt-1">
-                    Created: {new Date(wall.created_at).toLocaleDateString()}
+                    Created: {formatDate(wall.created_at)}
                   </p>
                   <p className="text-xs text-gray-500 mt-1">
                     {wall.owner_id === user.id ? '👤 Owner' : '👥 Friend'}
@@ -328,26 +329,26 @@ export default function DashboardPage() {
       </div>
 
       {/* Password Modal - Create Wall */}
-{showPasswordModal && (
-  <PasswordModal
-    email={user.email}
-    title="Create New Wall"
-    message="Enter your password to create a new wall"
-    onConfirm={createWall}
-    onCancel={() => setShowPasswordModal(false)}
-  />
-)}
+      {showPasswordModal && (
+        <PasswordModal
+          email={user.email}
+          title="Create New Wall"
+          message="Enter your password to create a new wall"
+          onConfirm={createWall}
+          onCancel={() => setShowPasswordModal(false)}
+        />
+      )}
 
-{/* Password Modal - Open Wall */}
-{showWallPasswordModal && (
-  <PasswordModal
-    email={user.email}
-    title="Access Wall"
-    message="Enter your password to access this wall"
-    onConfirm={verifyWallAccess}
-    onCancel={() => setShowWallPasswordModal(false)}
-  />
-)}
+      {/* Password Modal - Open Wall */}
+      {showWallPasswordModal && (
+        <PasswordModal
+          email={user.email}
+          title="Access Wall"
+          message="Enter your password to access this wall"
+          onConfirm={verifyWallAccess}
+          onCancel={() => setShowWallPasswordModal(false)}
+        />
+      )}
 
       {/* Logout Modal */}
       {showLogoutModal && (

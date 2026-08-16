@@ -1,13 +1,16 @@
 'use client'
 import { useParams } from 'next/navigation'
 import { useEffect, useState } from 'react'
-import { createClient } from '@/lib/supabase/client'
+import { useAuth } from '@/hooks/useAuth'
+import { getImageUrl, getRandomRotation } from '@/utils/helpers'
 import CommentModal from '@/app/components/CommentModal'
 import toast from 'react-hot-toast'
+import type { Photo } from '@/types'
 
 export default function WallPage() {
   const params = useParams()
-  const [photos, setPhotos] = useState<any[]>([])
+  const { user, supabase } = useAuth()
+  const [photos, setPhotos] = useState<Photo[]>([])
   const [showUpload, setShowUpload] = useState(false)
   const [file, setFile] = useState<File | null>(null)
   const [date, setDate] = useState('')
@@ -16,19 +19,11 @@ export default function WallPage() {
   const [loading, setLoading] = useState(false)
   const [selectedPhoto, setSelectedPhoto] = useState<string | null>(null)
   const [wallDetails, setWallDetails] = useState<any>(null)
-  const [user, setUser] = useState<any>(null)
-  const supabase = createClient()
 
   useEffect(() => {
     fetchWallDetails()
     fetchPhotos()
-    getCurrentUser()
   }, [])
-
-  const getCurrentUser = async () => {
-    const { data } = await supabase.auth.getUser()
-    setUser(data.user)
-  }
 
   const fetchWallDetails = async () => {
     const { data } = await supabase
@@ -52,20 +47,10 @@ export default function WallPage() {
     }
 
     if (data) {
-      const photosWithUrls = data.map((photo) => {
-        const fileName = photo.image_url.includes('/') 
-          ? photo.image_url.split('/').pop() 
-          : photo.image_url
-        
-        const { data: urlData } = supabase.storage
-          .from('photos')
-          .getPublicUrl(fileName || '')
-        
-        return {
-          ...photo,
-          image_url: urlData?.publicUrl || ''
-        }
-      })
+      const photosWithUrls = data.map((photo) => ({
+        ...photo,
+        image_url: getImageUrl(photo.image_url, supabase)
+      }))
       setPhotos(photosWithUrls)
     }
   }
@@ -108,6 +93,24 @@ export default function WallPage() {
       toast.error('Failed to save: ' + insertError.message)
       setLoading(false)
       return
+    }
+
+    // If comment was added, insert it
+    if (comment.trim()) {
+      // We need the photo ID - get the inserted photo
+      const { data: insertedPhoto } = await supabase
+        .from('photos')
+        .select('id')
+        .eq('image_url', fileName)
+        .single()
+      
+      if (insertedPhoto) {
+        await supabase.from('comments').insert({
+          photo_id: insertedPhoto.id,
+          user_id: user.data.user?.id,
+          content: comment
+        })
+      }
     }
 
     toast.success('Memory added! 🌸')
@@ -163,20 +166,6 @@ export default function WallPage() {
       {/* Green overlay for garden feel */}
       <div className="absolute inset-0 bg-green-900/20 backdrop-blur-[1px]"></div>
 
-      {/* Decorative tree branches - SVG overlay */}
-      <div className="absolute inset-0 pointer-events-none opacity-40">
-        <svg className="w-full h-full" viewBox="0 0 1200 800" preserveAspectRatio="none">
-          <path d="M100,100 Q300,50 400,200 Q500,350 700,300 Q900,250 1100,400" 
-                stroke="#2d1b0e" strokeWidth="8" fill="none" className="branch"/>
-          <path d="M400,200 Q450,150 500,180 Q550,210 600,190" 
-                stroke="#2d1b0e" strokeWidth="5" fill="none" className="branch"/>
-          <path d="M700,300 Q750,250 800,280 Q850,310 900,290" 
-                stroke="#2d1b0e" strokeWidth="5" fill="none" className="branch"/>
-          <path d="M300,50 Q350,20 400,50 Q450,80 500,60" 
-                stroke="#2d1b0e" strokeWidth="4" fill="none" className="branch"/>
-        </svg>
-      </div>
-
       {/* Wall title */}
       <h1 className="text-3xl sm:text-4xl font-bold text-center mb-2 relative z-10 text-white drop-shadow-lg tracking-wider">
         🌿 Memory Wall
@@ -192,47 +181,34 @@ export default function WallPage() {
         </div>
       )}
 
-      {/* Photo grid - Hanging from branches */}
-      <div className="relative z-10 max-w-6xl mx-auto grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-6 sm:gap-8">
+      {/* Photo grid */}
+      <div className="relative z-10 max-w-6xl mx-auto grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-4 sm:gap-6">
         {photos.length === 0 ? (
           <p className="text-center text-white/60 col-span-full py-12">No memories yet. Add your first photo!</p>
         ) : (
           photos.map((photo, index) => {
-            // Random hanging angles and heights
-            const angles = [-3, 2, -5, 4, -2, 3, -4, 5, -6, 2]
-            const angle = angles[index % angles.length]
-            const topOffsets = ['mt-0', 'mt-8', 'mt-4', 'mt-12', 'mt-6', 'mt-16']
-            const topOffset = topOffsets[index % topOffsets.length]
+            const rotation = getRandomRotation(index)
             
             return (
               <div
                 key={photo.id}
-                className={`relative ${topOffset} group`}
-                style={{ transform: `rotate(${angle}deg)` }}
+                className="relative group cursor-pointer"
+                style={{ transform: `rotate(${rotation}deg)` }}
+                onClick={() => setSelectedPhoto(photo.id)}
               >
-                {/* Hanging string */}
-                <div className="absolute -top-8 left-1/2 w-[1px] h-8 bg-[#2d1b0e]/60 origin-top"
-                     style={{ transform: 'rotate(var(--string-angle, 0deg))' }}></div>
-                
-                {/* Photo card */}
-                <div className="relative rounded-2xl overflow-hidden shadow-2xl transition-all duration-500 hover:scale-105 hover:shadow-3xl">
+                <div className="relative rounded-2xl overflow-hidden shadow-2xl transition-all duration-500 group-hover:scale-105">
                   <div className="relative w-full aspect-square">
                     {photo.image_url ? (
                       <img
                         src={photo.image_url}
                         alt="Memory"
-                        className="w-full h-full object-cover transition-all duration-700 group-hover:scale-110"
+                        className="w-full h-full object-cover"
                       />
                     ) : (
                       <div className="w-full h-full bg-gray-800 flex items-center justify-center text-white/30">
                         No image
                       </div>
                     )}
-                    
-                    {/* Date badge - always visible */}
-                    <div className="absolute top-3 left-3 bg-black/50 backdrop-blur-sm px-3 py-1 rounded-full">
-                      <p className="text-white text-xs font-medium">{photo.date || 'No date'}</p>
-                    </div>
                     
                     {/* Delete button - only for owner */}
                     {user && wallDetails?.owner_id === user.id && (
@@ -241,24 +217,22 @@ export default function WallPage() {
                           e.stopPropagation()
                           deletePhoto(photo.id)
                         }}
-                        className="absolute top-3 right-3 bg-red-500/80 text-white p-1.5 rounded-full opacity-0 group-hover:opacity-100 transition-opacity hover:bg-red-600"
+                        className="absolute top-2 right-2 bg-red-500/80 text-white p-1.5 rounded-full opacity-0 group-hover:opacity-100 transition-opacity hover:bg-red-600 text-xs z-10"
                       >
                         ✕
                       </button>
                     )}
                   </div>
                   
-                  {/* Bottom overlay with mood and comments */}
-                  <div 
-                    className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/80 via-black/40 to-transparent p-3 cursor-pointer group-hover:from-black/90 transition-all duration-300"
-                    onClick={() => setSelectedPhoto(photo.id)}
-                  >
+                  {/* Overlay - shows on hover */}
+                  <div className="absolute inset-0 bg-black/60 backdrop-blur-sm flex flex-col items-center justify-center p-4 opacity-0 group-hover:opacity-100 transition-opacity duration-300">
+                    <p className="text-white text-sm font-medium">{photo.date || 'No date'}</p>
                     {photo.mood && (
-                      <p className="text-pink-300 text-xs font-medium">💭 {photo.mood}</p>
+                      <p className="text-pink-300 text-sm mt-1">💭 {photo.mood}</p>
                     )}
-                    <div className="flex items-center gap-1 text-white/70 text-xs hover:text-white transition">
+                    <p className="text-white/80 text-xs mt-2 flex items-center gap-1">
                       💬 <span>Comments</span>
-                    </div>
+                    </p>
                   </div>
                 </div>
               </div>
