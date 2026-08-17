@@ -4,3 +4,5 @@ node_modules/
 *.node
 *.dll
 .DS_Store
+.vercel
+.env*
