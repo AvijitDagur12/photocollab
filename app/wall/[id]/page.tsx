@@ -1,14 +1,16 @@
 'use client'
-import { useParams } from 'next/navigation'
+import { useParams, useRouter } from 'next/navigation'
 import { useEffect, useState } from 'react'
 import { useAuth } from '@/hooks/useAuth'
-import { getImageUrl, getRandomRotation } from '@/utils/helpers'
+import { getImageUrl } from '@/utils/helpers'
 import CommentModal from '@/app/components/CommentModal'
+import ConfirmModal from '@/app/components/ConfirmModal'
 import toast from 'react-hot-toast'
 import type { Photo } from '@/types'
 
 export default function WallPage() {
   const params = useParams()
+  const router = useRouter()
   const { user, supabase } = useAuth()
   const [photos, setPhotos] = useState<Photo[]>([])
   const [showUpload, setShowUpload] = useState(false)
@@ -19,6 +21,9 @@ export default function WallPage() {
   const [loading, setLoading] = useState(false)
   const [selectedPhoto, setSelectedPhoto] = useState<string | null>(null)
   const [wallDetails, setWallDetails] = useState<any>(null)
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false)
+  const [photoToDelete, setPhotoToDelete] = useState<string | null>(null)
+  const [selectedImage, setSelectedImage] = useState<string | null>(null)
 
   useEffect(() => {
     fetchWallDetails()
@@ -95,9 +100,7 @@ export default function WallPage() {
       return
     }
 
-    // If comment was added, insert it
     if (comment.trim()) {
-      // We need the photo ID - get the inserted photo
       const { data: insertedPhoto } = await supabase
         .from('photos')
         .select('id')
@@ -123,10 +126,10 @@ export default function WallPage() {
     fetchPhotos()
   }
 
-  const deletePhoto = async (photoId: string) => {
-    if (!confirm('Delete this memory?')) return
+  const deletePhoto = async () => {
+    if (!photoToDelete) return
     
-    const photo = photos.find(p => p.id === photoId)
+    const photo = photos.find(p => p.id === photoToDelete)
     if (photo) {
       const fileName = photo.image_url.split('/').pop()
       if (fileName) {
@@ -134,8 +137,10 @@ export default function WallPage() {
       }
     }
     
-    await supabase.from('photos').delete().eq('id', photoId)
+    await supabase.from('photos').delete().eq('id', photoToDelete)
     toast.success('Memory deleted')
+    setShowDeleteConfirm(false)
+    setPhotoToDelete(null)
     fetchPhotos()
   }
 
@@ -155,89 +160,98 @@ export default function WallPage() {
 
   return (
     <div
-      className="min-h-screen p-4 sm:p-6 relative overflow-y-auto"
+      className="min-h-screen p-4 sm:p-6 relative overflow-y-auto bg-black"
       style={{
-        backgroundImage: 'url(https://images.unsplash.com/photo-1500382017468-9049fed747ef?w=1600)',
-        backgroundSize: 'cover',
-        backgroundPosition: 'center',
+        backgroundImage: 'radial-gradient(ellipse at 20% 50%, #1a1a2e 0%, #0a0a15 40%, #000000 80%)',
         backgroundAttachment: 'fixed'
       }}
     >
-      {/* Green overlay for garden feel */}
-      <div className="absolute inset-0 bg-green-900/20 backdrop-blur-[1px]"></div>
+      {/* Decorative minimal particles */}
+      <div className="absolute inset-0 pointer-events-none overflow-hidden opacity-20">
+        <div className="absolute top-10 left-10 w-1 h-1 bg-white/20 rounded-full"></div>
+        <div className="absolute top-20 right-20 w-2 h-2 bg-white/15 rounded-full"></div>
+        <div className="absolute bottom-10 left-1/4 w-1.5 h-1.5 bg-white/10 rounded-full"></div>
+        <div className="absolute top-1/3 right-1/4 w-1 h-1 bg-white/20 rounded-full"></div>
+        <div className="absolute bottom-1/4 right-10 w-2 h-2 bg-white/10 rounded-full"></div>
+        <div className="absolute top-2/3 left-5 w-1 h-1 bg-white/15 rounded-full"></div>
+      </div>
+
+      {/* Back Button */}
+      <button
+        onClick={() => router.back()}
+        className="absolute top-4 left-4 z-20 bg-white/10 backdrop-blur-sm text-white p-2 rounded-xl hover:bg-white/20 transition"
+      >
+        ← Back
+      </button>
 
       {/* Wall title */}
-      <h1 className="text-3xl sm:text-4xl font-bold text-center mb-2 relative z-10 text-white drop-shadow-lg tracking-wider">
+      <h1 className="text-3xl sm:text-4xl font-bold text-center mb-2 relative z-10 text-white/90 drop-shadow-lg tracking-wider">
         🌿 Memory Wall
       </h1>
       
       {/* Wall Details */}
       {wallDetails && (
         <div className="text-center mb-6 relative z-10">
-          <p className="text-sm text-white/80 font-mono">Code: <span className="font-bold">{wallDetails.join_code}</span></p>
-          <p className="text-xs text-white/60">
+          <p className="text-sm text-white/50 font-mono">Code: <span className="font-bold text-white/70">{wallDetails.join_code}</span></p>
+          <p className="text-xs text-white/30">
             Created: {new Date(wallDetails.created_at).toLocaleDateString()}
           </p>
         </div>
       )}
 
-      {/* Photo grid */}
+      {/* Photo grid - 90 degree constant */}
       <div className="relative z-10 max-w-6xl mx-auto grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-4 sm:gap-6">
         {photos.length === 0 ? (
-          <p className="text-center text-white/60 col-span-full py-12">No memories yet. Add your first photo!</p>
+          <p className="text-center text-white/40 col-span-full py-12">No memories yet. Add your first photo!</p>
         ) : (
-          photos.map((photo, index) => {
-            const rotation = getRandomRotation(index)
-            
-            return (
-              <div
-                key={photo.id}
-                className="relative group cursor-pointer"
-                style={{ transform: `rotate(${rotation}deg)` }}
-                onClick={() => setSelectedPhoto(photo.id)}
-              >
-                <div className="relative rounded-2xl overflow-hidden shadow-2xl transition-all duration-500 group-hover:scale-105">
-                  <div className="relative w-full aspect-square">
-                    {photo.image_url ? (
-                      <img
-                        src={photo.image_url}
-                        alt="Memory"
-                        className="w-full h-full object-cover"
-                      />
-                    ) : (
-                      <div className="w-full h-full bg-gray-800 flex items-center justify-center text-white/30">
-                        No image
-                      </div>
-                    )}
-                    
-                    {/* Delete button - only for owner */}
-                    {user && wallDetails?.owner_id === user.id && (
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation()
-                          deletePhoto(photo.id)
-                        }}
-                        className="absolute top-2 right-2 bg-red-500/80 text-white p-1.5 rounded-full opacity-0 group-hover:opacity-100 transition-opacity hover:bg-red-600 text-xs z-10"
-                      >
-                        ✕
-                      </button>
-                    )}
-                  </div>
+          photos.map((photo) => (
+            <div
+              key={photo.id}
+              className="relative group cursor-pointer"
+              onClick={() => setSelectedImage(photo.image_url)}
+            >
+              <div className="relative rounded-2xl overflow-hidden shadow-2xl transition-all duration-300 hover:scale-105 hover:shadow-[0_0_30px_rgba(255,255,255,0.1)]">
+                <div className="relative w-full aspect-square">
+                  {photo.image_url ? (
+                    <img
+                      src={photo.image_url}
+                      alt="Memory"
+                      className="w-full h-full object-cover"
+                    />
+                  ) : (
+                    <div className="w-full h-full bg-gray-800 flex items-center justify-center text-white/30">
+                      No image
+                    </div>
+                  )}
                   
-                  {/* Overlay - shows on hover */}
-                  <div className="absolute inset-0 bg-black/60 backdrop-blur-sm flex flex-col items-center justify-center p-4 opacity-0 group-hover:opacity-100 transition-opacity duration-300">
-                    <p className="text-white text-sm font-medium">{photo.date || 'No date'}</p>
-                    {photo.mood && (
-                      <p className="text-pink-300 text-sm mt-1">💭 {photo.mood}</p>
-                    )}
-                    <p className="text-white/80 text-xs mt-2 flex items-center gap-1">
-                      💬 <span>Comments</span>
-                    </p>
-                  </div>
+                  {/* Delete button - only for owner */}
+                  {user && wallDetails?.owner_id === user.id && (
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        setPhotoToDelete(photo.id)
+                        setShowDeleteConfirm(true)
+                      }}
+                      className="absolute top-2 right-2 bg-red-500/80 text-white p-1.5 rounded-full opacity-0 group-hover:opacity-100 transition-opacity hover:bg-red-600 text-xs z-10"
+                    >
+                      ✕
+                    </button>
+                  )}
+                </div>
+                
+                {/* Overlay - shows on hover */}
+                <div className="absolute inset-0 bg-black/50 backdrop-blur-sm flex flex-col items-center justify-center p-4 opacity-0 group-hover:opacity-100 transition-opacity duration-300">
+                  <p className="text-white text-sm font-medium">{photo.date || 'No date'}</p>
+                  {photo.mood && (
+                    <p className="text-pink-300 text-sm mt-1">💭 {photo.mood}</p>
+                  )}
+                  <p className="text-white/70 text-xs mt-2 flex items-center gap-1">
+                    💬 <span>Comments</span>
+                  </p>
                 </div>
               </div>
-            )
-          })
+            </div>
+          ))
         )}
       </div>
 
@@ -247,15 +261,36 @@ export default function WallPage() {
           onClick={() => setShowUpload(true)}
           className="bg-gradient-to-r from-pink-500 to-rose-500 text-white p-4 rounded-full shadow-2xl hover:shadow-pink-500/50 transition text-3xl border-2 border-white/30 hover:scale-110"
         >
-          🌸
+          +
         </button>
       </div>
 
+      {/* Image Preview Modal */}
+      {selectedImage && (
+        <div 
+          className="fixed inset-0 bg-black/90 backdrop-blur-md flex items-center justify-center p-4 z-50"
+          onClick={() => setSelectedImage(null)}
+        >
+          <button
+            onClick={() => setSelectedImage(null)}
+            className="absolute top-4 right-4 text-white text-3xl hover:scale-110 transition"
+          >
+            ✕
+          </button>
+          <img
+            src={selectedImage}
+            alt="Preview"
+            className="max-w-full max-h-[90vh] object-contain rounded-2xl shadow-2xl"
+            onClick={(e) => e.stopPropagation()}
+          />
+        </div>
+      )}
+
       {/* Upload Modal */}
       {showUpload && (
-        <div className="fixed inset-0 bg-black/70 backdrop-blur-md flex items-center justify-center p-4 z-50">
+        <div className="fixed inset-0 bg-black/80 backdrop-blur-md flex items-center justify-center p-4 z-50">
           <div className="bg-[#1a1a2e] border border-white/10 p-6 rounded-2xl max-w-md w-full shadow-2xl">
-            <h2 className="text-2xl mb-4 text-pink-400">🌸 Add Memory</h2>
+            <h2 className="text-2xl mb-4 text-pink-400">Add Memory</h2>
             <input
               type="file"
               accept="image/*"
@@ -299,6 +334,24 @@ export default function WallPage() {
             </div>
           </div>
         </div>
+      )}
+
+      {/* Delete Confirmation Modal */}
+      {showDeleteConfirm && (
+        <ConfirmModal
+          title="Delete Memory?"
+          message="Are you sure you want to delete this memory forever? This cannot be undone."
+          confirmText="Delete"
+          cancelText="Cancel"
+          onConfirm={() => {
+            setShowDeleteConfirm(false)
+            deletePhoto()
+          }}
+          onCancel={() => {
+            setShowDeleteConfirm(false)
+            setPhotoToDelete(null)
+          }}
+        />
       )}
 
       {/* Comment Modal */}

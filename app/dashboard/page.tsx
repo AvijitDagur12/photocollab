@@ -128,6 +128,30 @@ export default function DashboardPage() {
 
   const deleteWall = async () => {
     if (!user) return
+    
+    const { data: wall } = await supabase
+      .from('walls')
+      .select('id, owner_id, friend_id')
+      .eq('join_code', deleteCode.toUpperCase())
+      .single()
+
+    if (!wall) {
+      toast.error('❌ Invalid code.')
+      return
+    }
+
+    // Check if user is owner or friend
+    if (wall.owner_id !== user.id && wall.friend_id !== user.id) {
+      toast.error('❌ You are not authorized to delete this wall.')
+      setDeleteCode('')
+      return
+    }
+
+    // Show confirm modal instead of alert
+    setShowDeleteConfirm(true)
+  }
+
+  const confirmDeleteWall = async () => {
     const { data: wall } = await supabase
       .from('walls')
       .select('id')
@@ -138,9 +162,6 @@ export default function DashboardPage() {
       toast.error('❌ Invalid code.')
       return
     }
-
-    const confirm = window.confirm('⚠️ Delete entire wall forever?')
-    if (!confirm) return
 
     const { data: photos } = await supabase
       .from('photos')
@@ -156,6 +177,7 @@ export default function DashboardPage() {
     fetchWalls()
     setDeleteCode('')
     setShowDelete(false)
+    setShowDeleteConfirm(false)
     toast.success('🗑️ Wall deleted.')
   }
 
@@ -163,6 +185,9 @@ export default function DashboardPage() {
     await supabase.auth.signOut()
     router.push('/auth/login')
   }
+
+  // State for delete confirmation modal
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false)
 
   if (!user) return (
     <div className="min-h-screen bg-black flex items-center justify-center">
@@ -347,6 +372,21 @@ export default function DashboardPage() {
           message="Enter your password to access this wall"
           onConfirm={verifyWallAccess}
           onCancel={() => setShowWallPasswordModal(false)}
+        />
+      )}
+
+      {/* Delete Confirmation Modal */}
+      {showDeleteConfirm && (
+        <ConfirmModal
+          title="Delete Wall?"
+          message="Are you sure you want to delete this wall forever? This action cannot be undone."
+          confirmText="Delete"
+          cancelText="Cancel"
+          onConfirm={() => {
+            setShowDeleteConfirm(false)
+            confirmDeleteWall()
+          }}
+          onCancel={() => setShowDeleteConfirm(false)}
         />
       )}
 
